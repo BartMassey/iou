@@ -42,6 +42,7 @@ impl<S, F, T> Iou<S, F, T>
         }
     }
 
+    /// Check whether the value has been initialized yet.
     pub fn is_init(&self) -> bool {
         matches!(&*self.0.borrow(), IouState::Init(_))
     }
