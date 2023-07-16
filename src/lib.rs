@@ -11,11 +11,11 @@
 //! function panics during initialization. Operations on an [Iou]
 //! with a corrupted cell will themselves panic.
 
-use std::cell::{RefCell, Ref, RefMut};
+use core::cell::UnsafeCell;
 
 /// Initialize on use: a value that will be lazily
 /// initialized at first reference.
-pub struct Iou<S, F, T>(RefCell<IouState<S, F, T>>);
+pub struct Iou<S, F, T>(UnsafeCell<IouState<S, F, T>>);
 
 enum IouState<S, F, T> {
     /// Not yet initialized.
@@ -29,7 +29,7 @@ impl<S, F, T> Iou<S, F, T> {
     /// use by applying the function `f` to the
     /// initialization data `init`.
     pub fn new(init: S, f: F) -> Self {
-        Iou(RefCell::new(IouState::PreInit(Some((init, f)))))
+        Iou(UnsafeCell::new(IouState::PreInit(Some((init, f)))))
     }
 }
 
@@ -49,9 +49,30 @@ impl<S, F, T> Iou<S, F, T>
         }
     }
 
+    #[allow(clippy::mut_from_ref)]
+    unsafe fn get_ref(&self) -> &IouState<S, F, T> {
+        UnsafeCell::raw_get(&self.0).as_ref().unwrap()
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    unsafe fn get_mut_ref(&self) -> &mut IouState<S, F, T> {
+        UnsafeCell::raw_get(&self.0).as_mut().unwrap()
+    }
+
     /// Check whether the value has been initialized yet.
+    ///
+    /// # Panics
+    /// Panics on corrupted cell.
     pub fn is_init(&self) -> bool {
-        matches!(&*self.0.borrow(), IouState::Init(_))
+        // Safety: We are only reading the value, which
+        // cannot be mutated while we are checking.
+        unsafe {
+            let contents = self.get_ref();
+            if matches!(contents, IouState::PreInit(None)) {
+                panic!("Iou: corrupted cell");
+            }
+            matches!(contents, IouState::Init(_))
+        }
     }
 
     /// Initialize the [Iou] if not yet initialized.
@@ -59,13 +80,23 @@ impl<S, F, T> Iou<S, F, T>
     /// # Panics
     /// Panics on corrupted cell.
     pub fn init(&self) {
-        if self.is_init() {
-            return;
-        }
-        let mut iou = self.0.borrow_mut();
-        if let IouState::PreInit(p) = &mut *iou {
-            let (s, f) = p.take().expect("Iou: corrupted cell");
-            *iou = IouState::Init(f(s));
+        // Safety: This code can only panic:
+        //
+        // * During the `take()`, which is harmless as the
+        // value has not been altered.
+        //
+        // * During execution of `f()`, which leaves the
+        // value in a "corrupted cell" state that will be
+        // caught by future operations.
+        unsafe { 
+            let contents = self.get_mut_ref();
+            match contents {
+                IouState::PreInit(p) => {
+                    let (s, f) = p.take().expect("init: corrupted cell");
+                    *contents = IouState::Init(f(s));
+                }
+                IouState::Init(_) => (),
+            }
         }
     }
 
@@ -74,17 +105,18 @@ impl<S, F, T> Iou<S, F, T>
     ///
     /// # Panics
     /// Panics on corrupted cell.
-    pub fn borrow(&self) -> Ref<'_, T> {
-        self.init();
-        Ref::map(
-            self.0.borrow(),
-            |s| {
-                match s {
-                    IouState::Init(t) => t,
-                    _ => panic!("Iou: corrupted cell"),
-                }
-            },
-        )
+    pub fn get(&self) -> &T {
+        // Safety: At this point, the value will not be altered.
+        // The lifetime of the returned reference is valid, because
+        // this [Iou] owns its `Init` value and the [Iou] itself
+        // cannot be replaced or moved out of.
+        unsafe { 
+            let contents = self.get_ref();
+            match contents {
+                IouState::Init(ref t) => t,
+                _ => panic!("init: corrupted cell"),
+            }
+        }
     }
 
     /// Initialize the [Iou] if not yet initialized, then
@@ -92,16 +124,18 @@ impl<S, F, T> Iou<S, F, T>
     ///
     /// # Panics
     /// Panics on corrupted cell.
-    pub fn borrow_mut(&self) -> RefMut<'_, T> {
-        self.init();
-        RefMut::map(
-            self.0.borrow_mut(),
-            |s| {
-                match s {
-                    IouState::Init(t) => t,
-                    _ => panic!("Iou: corrupted cell"),
-                }
-            },
-        )
+    #[allow(clippy::mut_from_ref)]
+    pub fn get_mut(&self) -> &mut T {
+        // Safety: At this point, the value will not be altered.
+        // The lifetime of the returned reference is valid, because
+        // this [Iou] owns its `Init` value and the [Iou] itself
+        // cannot be replaced or moved out of.
+        unsafe { 
+            let contents = self.get_mut_ref();
+            match contents {
+                IouState::Init(ref mut t) => t,
+                _ => panic!("init: corrupted cell"),
+            }
+        }
     }
 }

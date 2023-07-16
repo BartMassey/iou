@@ -9,20 +9,17 @@ fn strchars(s: String) -> HashSet<char> {
 fn main() {
     let hello_chars = Iou::new("hello".to_string(), strchars);
 
-    let h = hello_chars.borrow();
+    let h = hello_chars.get();
     println!("{:?}", h);
-    drop(h);
 
-    let mut h = hello_chars.borrow_mut();
+    let h = hello_chars.get_mut();
     h.remove(&'l');
-    drop(h);
 
-    let r1 = hello_chars.borrow();
+    let r1 = hello_chars.get();
     println!("{:?}", r1);
-    let r2 = hello_chars.borrow();
+    let r2 = hello_chars.get();
+    println!("{:?}", r1);
     println!("{:?}", r2);
-    drop(r1);
-    drop(r2);
 
     let h = hello_chars.unwrap();
     println!("{:?}", h);
