@@ -50,8 +50,15 @@ impl<S, F, T> Iou<S, F, T>
     }
 
     /// Check whether the value has been initialized yet.
+    ///
+    /// # Panics
+    /// Panics on corrupted cell.
     pub fn is_init(&self) -> bool {
-        matches!(&*self.0.borrow(), IouState::Init(_))
+        match &*self.0.borrow() {
+            IouState::Init(_) => true,
+            IouState::PreInit(Some(_)) => false,
+            _ => panic!("Iou: corrupted cell"),
+        }
     }
 
     /// Initialize the [Iou] if not yet initialized.
